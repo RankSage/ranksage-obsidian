@@ -1,0 +1,11 @@
+{
+  "id": "ranksage-obsidian",
+  "name": "RankSage Daily Brief",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Inject your RankSage SEO, AEO, and AI visibility daily brief into your Obsidian daily notes automatically.",
+  "author": "RankSage",
+  "authorUrl": "https://ranksage.io",
+  "fundingUrl": "https://ranksage.io/pricing",
+  "isDesktopOnly": true
+}
