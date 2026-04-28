@@ -15,6 +15,7 @@ import {
   Notice,
   Plugin,
   TFile,
+  addIcon,
   moment,
   ObsidianProtocolData,
 } from 'obsidian';
@@ -22,6 +23,24 @@ import { PluginSettings, PluginData, DEFAULT_SETTINGS, DEFAULT_DATA } from './ty
 import { generatePKCEParams, buildAuthorizeUrl, exchangeCodeForTokens, refreshAccessToken } from './oauth';
 import { fetchDigest, formatDigestBlock, injectDigestBlock } from './digest';
 import { RankSageSettingsTab } from './settings';
+
+// ── RankSage brand icon ───────────────────────────────────────────────────────
+// Normalized from the official SVG (596.89 × 371.42) to Obsidian's 0-0-100-100
+// viewBox space using transform="translate(0,18.9) scale(0.1675)".
+// Brand blue #5562ff + gold #fbb040 are readable on both dark and light sidebars.
+const RANKSAGE_ICON_SVG = `
+<g transform="translate(0,18.9) scale(0.1675)">
+  <path fill="#5562ff" d="M496.96,90.07L596.89,0h-94.94c-102.4,0-185.71,83.31-185.71,185.71h90.07c0-52.74,37.92-95.64,90.66-95.64Z"/>
+  <path fill="#5562ff" d="M190.59,185.71h90.07C280.65,83.31,197.35,0,94.94,0H0l99.92,90.07c52.74,0,90.67,42.91,90.67,95.64Z"/>
+  <path fill="#5562ff" d="M285.63,371.42v-90.07c-52.74,0-95.64-42.91-95.64-95.64h-90.07c0,102.4,83.31,185.71,185.71,185.71Z"/>
+  <path fill="#5562ff" d="M496.55,185.71h-90.07c0,52.74-42.91,95.64-95.64,95.64v90.07c102.4,0,185.71-83.31,185.71-185.71Z"/>
+  <polygon fill="#fbb040" points="298.61 200.02 269.17 233.27 298.61 266.52 328.04 233.27"/>
+  <polyline fill="none" stroke="#5562ff" stroke-width="5.97" points="99.92 185.71 99.92 90.19 496.96 90.19 496.55 185.71"/>
+  <path fill="#5562ff" d="M209.03,182.94c0,.18-.03.35-.03.53,0,14.64,11.87,26.51,26.51,26.51s26.51-11.87,26.51-26.51c0-.18-.02-.35-.03-.53h-52.97Z"/>
+  <path fill="#5562ff" d="M335.21,182.94c0,.18-.03.35-.03.53,0,14.64,11.87,26.51,26.51,26.51s26.51-11.87,26.51-26.51c0-.18-.02-.35-.03-.53h-52.97Z"/>
+</g>
+`;
+
 
 export default class RankSagePlugin extends Plugin {
   settings!: PluginSettings;
@@ -37,6 +56,10 @@ export default class RankSagePlugin extends Plugin {
     await this.loadSettings();
     await this.loadPluginData();
 
+    // Register the RankSage brand mark as a custom Obsidian icon.
+    // Must be called before addRibbonIcon so the icon is available.
+    addIcon('ranksage-logo', RANKSAGE_ICON_SVG);
+
     // Register the obsidian://ranksage-callback protocol handler
     // WHY registerObsidianProtocolHandler: this is the only sanctioned Obsidian
     // API for receiving data from external URLs. The system browser redirects to
@@ -50,12 +73,12 @@ export default class RankSagePlugin extends Plugin {
       this.runDigestInjection()
     );
 
-    // Ribbon icon
-    this.addRibbonIcon('bar-chart-2', 'Refresh RankSage Daily Brief', () =>
+    // Ribbon icon — uses the registered RankSage brand mark
+    this.addRibbonIcon('ranksage-logo', 'Refresh RankSage Daily Brief', () =>
       this.runDigestInjection()
     );
 
-    // Command palette entry
+    // Command palette entry — fetch real digest
     this.addCommand({
       id: 'refresh-ranksage-brief',
       name: 'Refresh RankSage Daily Brief',
@@ -109,7 +132,7 @@ export default class RankSagePlugin extends Plugin {
       const pkce = await generatePKCEParams();
       this.pendingOAuth = { codeVerifier: pkce.codeVerifier, state: pkce.state };
 
-      const authorizeUrl = buildAuthorizeUrl(this.settings.backendUrl, pkce);
+      const authorizeUrl = buildAuthorizeUrl(pkce);
 
       // Open system browser — Obsidian's shell API
       window.open(authorizeUrl);
@@ -151,7 +174,7 @@ export default class RankSagePlugin extends Plugin {
       const { codeVerifier } = this.pendingOAuth;
       this.pendingOAuth = null;
 
-      const tokens = await exchangeCodeForTokens(this.settings.backendUrl, code, codeVerifier);
+      const tokens = await exchangeCodeForTokens(code, codeVerifier);
       await this.storeTokens(tokens);
 
       new Notice('✅ RankSage connected! Fetching your daily brief...');
@@ -194,7 +217,7 @@ export default class RankSagePlugin extends Plugin {
 
     // Silent background refresh
     try {
-      const tokens = await refreshAccessToken(this.settings.backendUrl, refreshToken);
+      const tokens = await refreshAccessToken(refreshToken);
       await this.storeTokens(tokens);
       return tokens.access_token;
     } catch (error) {
@@ -244,7 +267,7 @@ export default class RankSagePlugin extends Plugin {
     }
 
     try {
-      const digest = await fetchDigest(this.settings.backendUrl, accessToken);
+      const digest = await fetchDigest(accessToken, this.settings.digestFrequency);
       const fetchedAt = new Date().toISOString();
       this.pluginData.lastDigest = digest;
       this.pluginData.lastFetchedAt = fetchedAt;
@@ -291,7 +314,7 @@ export default class RankSagePlugin extends Plugin {
       return;
     }
 
-    let digestBlock = formatDigestBlock(digest, fetchedAt);
+    let digestBlock = formatDigestBlock(digest, fetchedAt, this.settings.digestFrequency);
 
     if (options.stale) {
       const staleSince = this.pluginData.lastFetchedAt
@@ -310,26 +333,29 @@ export default class RankSagePlugin extends Plugin {
   }
 
   /**
-   * Locate today's daily note using the Daily Notes core plugin settings.
-   * Creates it if it doesn't exist yet.
+   * Locate today's daily note, creating it (and any required folders) if absent.
    *
-   * WHY we use app.internalPlugins: the Daily Notes core plugin stores its folder
-   * and date format settings there. Using these instead of hardcoding "YYYY-MM-DD"
-   * ensures the plugin respects whatever format the user has configured.
+   * Folder resolution order:
+   *   1. Daily Notes core plugin settings (app.internalPlugins)
+   *   2. "Daily Notes folder" from plugin settings (user-configured fallback)
+   *   3. Vault root (empty folder path)
    *
-   * @returns The TFile for today's daily note, or null if Daily Notes is disabled
+   * WHY recursive folder creation: vault.createFolder() only creates one level.
+   * Paths like "Journal/Daily" require creating "Journal" before "Journal/Daily".
+   *
+   * @returns The TFile for today's daily note, or null on unrecoverable failure
    */
   private async getOrCreateTodaysDailyNote(): Promise<TFile | null> {
-    // Access Daily Notes core plugin settings
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dailyNotesPlugin = (this.app as any).internalPlugins?.getEnabledPluginById('daily-notes');
 
-    let folder = '';
+    let folder = this.settings.dailyNotesFolder;
     let format = 'YYYY-MM-DD';
 
     if (dailyNotesPlugin?.instance?.options) {
-      folder = dailyNotesPlugin.instance.options.folder ?? '';
-      format = dailyNotesPlugin.instance.options.format ?? 'YYYY-MM-DD';
+      // Core Daily Notes plugin is enabled — its settings take precedence
+      folder = dailyNotesPlugin.instance.options.folder ?? folder;
+      format = dailyNotesPlugin.instance.options.format ?? format;
     }
 
     // moment is globally available in Obsidian's runtime
@@ -339,20 +365,39 @@ export default class RankSagePlugin extends Plugin {
     const existing = this.app.vault.getAbstractFileByPath(filePath);
     if (existing instanceof TFile) return existing;
 
-    // Create the note if it doesn't exist (same behaviour as Daily Notes plugin)
     try {
-      // Ensure the folder exists first
       if (folder) {
-        const folderExists = this.app.vault.getAbstractFileByPath(folder);
-        if (!folderExists) {
-          await this.app.vault.createFolder(folder);
-        }
+        await this.ensureFolderPath(folder);
       }
       return await this.app.vault.create(filePath, '');
     } catch {
-      // Note may have been created concurrently (race condition on startup)
+      // Race condition: another process created the file between our check and create
       const retried = this.app.vault.getAbstractFileByPath(filePath);
       return retried instanceof TFile ? retried : null;
+    }
+  }
+
+  /**
+   * Recursively create all folders in a path.
+   * vault.createFolder() only handles one level — this walks each segment.
+   *
+   * WHY: Daily Notes folder paths like "Journal/Daily/2026" require three
+   * separate createFolder calls. Calling createFolder on the full path throws
+   * "Folder already exists" for every segment except the last.
+   *
+   * @param folderPath - Path like "Journal/Daily" or "Daily Notes"
+   */
+  private async ensureFolderPath(folderPath: string): Promise<void> {
+    const segments = folderPath.split('/').filter(Boolean);
+    let current = '';
+
+    for (const segment of segments) {
+      current = current ? `${current}/${segment}` : segment;
+      const exists = this.app.vault.getAbstractFileByPath(current);
+      if (!exists) {
+        // createFolder throws if the folder already exists — safe to ignore
+        await this.app.vault.createFolder(current).catch(() => {});
+      }
     }
   }
 }

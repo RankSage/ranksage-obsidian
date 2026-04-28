@@ -20,10 +20,10 @@ export class RankSageSettingsTab extends PluginSettingTab {
 
     // ── Connection status ──────────────────────────────────────────────────
     const isConnected = !!this.plugin.pluginData.refreshToken;
-    const statusEl = containerEl.createEl('p', {
+    containerEl.createEl('p', {
       text: isConnected
         ? '✅ Connected to RankSage'
-        : '❌ Not connected — click "Connect RankSage" to start',
+        : '❌ Not connected — click "Connect RankSage" below to link your account',
       cls: isConnected ? 'ranksage-status-connected' : 'ranksage-status-disconnected',
     });
 
@@ -49,16 +49,19 @@ export class RankSageSettingsTab extends PluginSettingTab {
         }
       });
 
-    // ── Backend URL ────────────────────────────────────────────────────────
+    // ── Daily Notes folder ─────────────────────────────────────────────────
     new Setting(containerEl)
-      .setName('Backend URL')
-      .setDesc('RankSage API URL. Leave as default unless self-hosting.')
+      .setName('Daily Notes folder (fallback)')
+      .setDesc(
+        'Used when the Daily Notes core plugin is disabled or has no folder set. ' +
+        'Supports nested paths like "Journal/Daily". Leave blank to create notes at vault root.'
+      )
       .addText((text) =>
         text
-          .setPlaceholder('https://api.ranksage.io')
-          .setValue(this.plugin.settings.backendUrl)
+          .setPlaceholder('e.g. Daily Notes or Journal/Daily')
+          .setValue(this.plugin.settings.dailyNotesFolder)
           .onChange(async (value) => {
-            this.plugin.settings.backendUrl = value.trim() || 'https://api.ranksage.io';
+            this.plugin.settings.dailyNotesFolder = value.trim();
             await this.plugin.saveSettings();
           })
       );
@@ -75,6 +78,22 @@ export class RankSageSettingsTab extends PluginSettingTab {
           .setValue(this.plugin.settings.injectPosition)
           .onChange(async (value) => {
             this.plugin.settings.injectPosition = value as 'top' | 'bottom' | 'after-h1';
+            await this.plugin.saveSettings();
+          })
+      );
+
+    // ── Digest frequency ───────────────────────────────────────────────────
+    new Setting(containerEl)
+      .setName('Digest frequency')
+      .setDesc('Time window for the data in your daily brief.')
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption('daily', 'Daily (last 24 hours)')
+          .addOption('weekly', 'Weekly (last 7 days)')
+          .addOption('monthly', 'Monthly (last 30 days)')
+          .setValue(this.plugin.settings.digestFrequency)
+          .onChange(async (value) => {
+            this.plugin.settings.digestFrequency = value as 'daily' | 'weekly' | 'monthly';
             await this.plugin.saveSettings();
           })
       );

@@ -15,18 +15,25 @@ export interface PluginData {
 }
 
 export interface PluginSettings {
-  /** RankSage backend URL */
-  backendUrl: string;
   /** Inject position in daily note */
   injectPosition: 'top' | 'bottom' | 'after-h1';
   /** Whether to auto-inject on startup */
   autoInjectOnStartup: boolean;
+  /**
+   * Fallback folder for daily notes when the Daily Notes core plugin is disabled
+   * or has no folder configured. Leave blank to create notes at vault root.
+   * Supports nested paths like "Journal/Daily" — all intermediate folders are created.
+   */
+  dailyNotesFolder: string;
+  /** Time window for the digest: data from the past 1 day, 7 days, or 30 days */
+  digestFrequency: 'daily' | 'weekly' | 'monthly';
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
-  backendUrl: 'https://api.ranksage.io',
   injectPosition: 'top',
   autoInjectOnStartup: true,
+  dailyNotesFolder: '',
+  digestFrequency: 'daily',
 };
 
 export const DEFAULT_DATA: PluginData = {

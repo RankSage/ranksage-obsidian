@@ -14,6 +14,7 @@
 
 import { requestUrl } from 'obsidian';
 import { TokenResponse } from './types';
+import { BACKEND_URL } from './constants';
 
 const CLIENT_ID = 'ranksage-obsidian';
 const REDIRECT_URI = 'obsidian://ranksage-callback';
@@ -60,12 +61,11 @@ export async function generatePKCEParams(): Promise<PKCEParams> {
 /**
  * Build the authorization URL to open in the system browser.
  *
- * @param backendUrl - RankSage API base URL (e.g. https://api.ranksage.io)
  * @param pkce - PKCE params from generatePKCEParams()
  * @returns URL string to open in the browser
  */
-export function buildAuthorizeUrl(backendUrl: string, pkce: PKCEParams): string {
-  const url = new URL(`${backendUrl}/oauth/authorize`);
+export function buildAuthorizeUrl(pkce: PKCEParams): string {
+  const url = new URL(`${BACKEND_URL}/oauth/authorize`);
   url.searchParams.set('client_id', CLIENT_ID);
   url.searchParams.set('redirect_uri', REDIRECT_URI);
   url.searchParams.set('scope', SCOPE);
@@ -80,18 +80,16 @@ export function buildAuthorizeUrl(backendUrl: string, pkce: PKCEParams): string 
  * Exchange an authorization code for access + refresh tokens.
  * Uses requestUrl() to bypass CORS from within the Obsidian Electron process.
  *
- * @param backendUrl - RankSage API base URL
  * @param code - Auth code received in the obsidian:// callback
  * @param codeVerifier - PKCE code verifier generated before the flow started
  * @returns TokenResponse from the backend
  */
 export async function exchangeCodeForTokens(
-  backendUrl: string,
   code: string,
   codeVerifier: string
 ): Promise<TokenResponse> {
   const response = await requestUrl({
-    url: `${backendUrl}/api/v1/oauth/token`,
+    url: `${BACKEND_URL}/api/v1/oauth/token`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -115,16 +113,12 @@ export async function exchangeCodeForTokens(
 /**
  * Refresh an expired access token using the stored refresh token.
  *
- * @param backendUrl - RankSage API base URL
  * @param refreshToken - The stored refresh token
  * @returns New TokenResponse (access + refresh tokens)
  */
-export async function refreshAccessToken(
-  backendUrl: string,
-  refreshToken: string
-): Promise<TokenResponse> {
+export async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
   const response = await requestUrl({
-    url: `${backendUrl}/api/v1/oauth/token`,
+    url: `${BACKEND_URL}/api/v1/oauth/token`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

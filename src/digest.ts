@@ -4,24 +4,25 @@
 
 import { requestUrl } from 'obsidian';
 import { DigestPayload, DigestWebsite } from './types';
+import { BACKEND_URL } from './constants';
 
 const BLOCK_START = '<!-- ranksage-digest-start -->';
 const BLOCK_END = '<!-- ranksage-digest-end -->';
 
 /**
- * Fetch the latest digest from the RankSage backend.
- * Uses requestUrl() to bypass CORS.
+ * Fetch the digest from the RankSage backend.
+ * Uses requestUrl() to bypass CORS from within the Obsidian Electron process.
  *
- * @param backendUrl - RankSage API base URL
  * @param accessToken - Valid OAuth access token
+ * @param period - Time window for the digest data
  * @returns DigestPayload on success
  */
 export async function fetchDigest(
-  backendUrl: string,
-  accessToken: string
+  accessToken: string,
+  period: 'daily' | 'weekly' | 'monthly'
 ): Promise<DigestPayload> {
   const response = await requestUrl({
-    url: `${backendUrl}/api/v1/digest`,
+    url: `${BACKEND_URL}/api/v1/digest?period=${period}`,
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -85,14 +86,25 @@ function formatWebsiteSection(site: DigestWebsite, fetchedAt: string): string {
   return lines.join('\n');
 }
 
+const FREQUENCY_LABEL: Record<string, string> = {
+  daily: 'Daily Brief',
+  weekly: 'Weekly Brief',
+  monthly: 'Monthly Brief',
+};
+
 /**
  * Format the complete digest payload as a Markdown block.
  *
  * @param digest - Digest payload from the API
  * @param fetchedAt - ISO timestamp when this digest was fetched
+ * @param period - Time window that was requested
  * @returns Markdown string wrapped in ranksage-digest-start/end comments
  */
-export function formatDigestBlock(digest: DigestPayload, fetchedAt: string): string {
+export function formatDigestBlock(
+  digest: DigestPayload,
+  fetchedAt: string,
+  period: 'daily' | 'weekly' | 'monthly' = 'daily'
+): string {
   const date = new Date(fetchedAt).toLocaleDateString('en-GB', {
     weekday: 'long',
     year: 'numeric',
@@ -107,8 +119,10 @@ export function formatDigestBlock(digest: DigestPayload, fetchedAt: string): str
 
   const footer = `_Last updated: ${new Date(fetchedAt).toLocaleTimeString()} · [Refresh](obsidian://ranksage-refresh)_`;
 
+  const heading = FREQUENCY_LABEL[period] ?? 'Brief';
+
   const block = [
-    `## 🌐 RankSage Daily Brief — ${date}`,
+    `## 🌐 RankSage ${heading} — ${date}`,
     '',
     sections,
     '',
