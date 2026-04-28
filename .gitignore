@@ -1,3 +1,13 @@
 node_modules/
 main.js
 *.js.map
+
+# Obsidian vault data — never commit tokens or plugin state
+data.json
+
+# Build artifacts
+dist/
+*.tgz
+
+# OS
+.DS_Store
