@@ -60,6 +60,10 @@ export interface DigestWebsite {
     visitors: number;
     visitorsDelta: number | null;
     trend: 'up' | 'down' | 'stable';
+    /** AIO-adjusted reachable visitors (P1.5 Traffic Reality). Negative delta = AIO is eating clicks. */
+    aioAdjustedVisitors?: number | null;
+    /** % difference between AIO-adjusted and traditional expected clicks (efficiency ratio − 1). */
+    aioTrafficImpactPct?: number | null;
   };
   keywords: {
     tracked: number;
@@ -71,6 +75,10 @@ export interface DigestWebsite {
     mentionScore: number;
     mentionDelta: number | null;
     aiModelsTracked: number;
+    /** Discovery Vulnerability Index (0–100): non-branded traffic at risk from AIO. */
+    discoveryVulnerabilityIndex?: number | null;
+    /** Platform display names where brand was cited in the most recent run. e.g. ['ChatGPT', 'Perplexity'] */
+    citedIn?: string[];
   };
   seoScore: number | null;
   seoScoreDelta: number | null;

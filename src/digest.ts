@@ -73,8 +73,30 @@ function formatWebsiteSection(site: DigestWebsite, fetchedAt: string): string {
       ? `⚠️ Alerts:\n${site.alerts.map((a) => `  - ${SEVERITY_PREFIX[a.severity]} ${a.message}`).join('\n')}`
       : '';
 
+  // DVI is surfaced via both discoveryVulnerabilityIndex (dedicated field) and mentionDelta
+  // (the spec-mandated field for Obsidian headline visibility). Prefer the dedicated field;
+  // fall back to mentionDelta for forwards-compatibility with older digests.
+  const dvi = site.aiVisibility.discoveryVulnerabilityIndex ?? site.aiVisibility.mentionDelta;
+  const dviStr =
+    dvi !== null && dvi !== undefined
+      ? ` · DVI ${dvi}/100${dvi >= 60 ? ' ⚠️' : ''}`
+      : '';
+
+  // AIO-adjusted reachable traffic (P1.5 Traffic Reality hook)
+  const aioAdj = site.traffic.aioAdjustedVisitors;
+  const aioImpact = site.traffic.aioTrafficImpactPct;
+  const aioStr =
+    aioAdj !== null && aioAdj !== undefined
+      ? ` · AIO-adj ${aioAdj.toLocaleString()}${aioImpact !== null && aioImpact !== undefined ? ` (${aioImpact > 0 ? '+' : ''}${aioImpact}%)` : ''}`
+      : '';
+
+  // Cited-in platforms from most recent AI visibility run
+  const citedIn = site.aiVisibility.citedIn ?? [];
+  const citedInStr = citedIn.length > 0 ? `🤖 Cited in: ${citedIn.join(', ')}` : '';
+
   const lines = [
-    `**${site.domain}** · Traffic ${site.traffic.visitors.toLocaleString()}${deltaStr} · AI Visibility ${site.aiVisibility.mentionScore}/100 · SEO Score ${seoStr}${seoDeltaStr}`,
+    `**${site.domain}** · Traffic ${site.traffic.visitors.toLocaleString()}${deltaStr}${aioStr} · AI Visibility ${site.aiVisibility.mentionScore}/100${dviStr} · SEO Score ${seoStr}${seoDeltaStr}`,
+    citedInStr,
     site.keywords.tracked > 0
       ? `📊 Keywords: ${site.keywords.tracked} tracked · ${site.keywords.improved} improved · ${site.keywords.declined} declined`
       : '',
