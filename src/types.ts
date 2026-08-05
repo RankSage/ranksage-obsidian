@@ -1,14 +1,26 @@
 /**
  * Persisted plugin data — stored via plugin.saveData() / plugin.loadData().
- * Tokens are opaque strings; the access token is stored plainly because
- * Obsidian's vault storage is user-owned local files (acceptable risk).
- * The refresh token is the sensitive long-lived credential — treat it with care.
+ *
+ * ── SECURITY (SEC-013) — KNOWN LIMITATION, read before changing ─────────────
+ * The refresh token below is written in PLAINTEXT to
+ * `.obsidian/plugins/ranksage-obsidian/data.json` inside the user's vault.
+ * Obsidian offers NO OS-keychain API to plugins, and any encryption key we
+ * could derive would itself have to live in the same data.json — that would be
+ * security theater, not security. The real mitigations are:
+ *   1. MINIMIZATION — only the refresh token is persisted. Access tokens live
+ *      exclusively in memory (see RankSagePlugin) and never touch disk.
+ *   2. ROTATION — the backend rotates the refresh token on every use and
+ *      atomically invalidates the previous one, so a copied data.json dies the
+ *      next time the plugin refreshes.
+ *   3. REVOCATION — Disconnect calls POST /api/v1/oauth/revoke (RFC 7009), so
+ *      the on-disk token is killed server-side, not just deleted locally.
+ *   4. SCOPE — the token can only ever mint digest:read access (1h TTL).
+ * Anyone with read access to the vault (e.g. an unencrypted sync target) can
+ * impersonate the plugin until the next rotation/revocation — advise users to
+ * exclude data.json from shared syncs or use Disconnect on shared machines.
  */
 export interface PluginData {
-  accessToken: string | null;
   refreshToken: string | null;
-  /** Unix ms timestamp of access token expiry */
-  accessTokenExpiresAt: number | null;
   lastDigest: DigestPayload | null;
   /** ISO timestamp of the last successful digest fetch */
   lastFetchedAt: string | null;
@@ -37,9 +49,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 };
 
 export const DEFAULT_DATA: PluginData = {
-  accessToken: null,
   refreshToken: null,
-  accessTokenExpiresAt: null,
   lastDigest: null,
   lastFetchedAt: null,
 };
@@ -72,7 +82,8 @@ export interface DigestWebsite {
     topMover: { keyword: string; positionDelta: number } | null;
   };
   aiVisibility: {
-    mentionScore: number;
+    /** Null when no AI platforms are tracked yet (unmeasured, not zero). */
+    mentionScore: number | null;
     mentionDelta: number | null;
     aiModelsTracked: number;
     /** Discovery Vulnerability Index (0–100): non-branded traffic at risk from AIO. */

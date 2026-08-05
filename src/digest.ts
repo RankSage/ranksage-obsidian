@@ -95,7 +95,7 @@ function formatWebsiteSection(site: DigestWebsite, fetchedAt: string): string {
   const citedInStr = citedIn.length > 0 ? `🤖 Cited in: ${citedIn.join(', ')}` : '';
 
   const lines = [
-    `**${site.domain}** · Traffic ${site.traffic.visitors.toLocaleString()}${deltaStr}${aioStr} · AI Visibility ${site.aiVisibility.mentionScore}/100${dviStr} · SEO Score ${seoStr}${seoDeltaStr}`,
+    `**${site.domain}** · Traffic ${site.traffic.visitors.toLocaleString()}${deltaStr}${aioStr} · AI Visibility ${site.aiVisibility.mentionScore ?? '—'}/100${dviStr} · SEO Score ${seoStr}${seoDeltaStr}`,
     citedInStr,
     site.keywords.tracked > 0
       ? `📊 Keywords: ${site.keywords.tracked} tracked · ${site.keywords.improved} improved · ${site.keywords.declined} declined`
