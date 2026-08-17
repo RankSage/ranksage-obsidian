@@ -136,3 +136,32 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 
   return response.json as TokenResponse;
 }
+
+/**
+ * WHAT: Revoke the refresh token server-side (RFC 7009) on Disconnect.
+ * HOW:  POST /api/v1/oauth/revoke with the raw refresh token — possession of the
+ *       token is the authentication, same as the refresh grant.
+ * WHY:  SEC-013 — the refresh token sits in plaintext in data.json; deleting it
+ *       locally is not enough. Revoking kills the grant in the backend DB so the
+ *       on-disk copy (and any sync backups of it) becomes worthless.
+ *
+ * @param refreshToken - The stored refresh token to revoke
+ * @throws Error on non-200 so the caller can decide how loudly to fail
+ */
+export async function revokeRefreshToken(refreshToken: string): Promise<void> {
+  const response = await requestUrl({
+    url: `${BACKEND_URL}/api/v1/oauth/revoke`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: CLIENT_ID,
+      token: refreshToken,
+    }),
+    throw: false,
+  });
+
+  if (response.status !== 200) {
+    const body = response.json as { message?: string } | undefined;
+    throw new Error(`Token revocation failed: ${body?.message ?? response.status}`);
+  }
+}

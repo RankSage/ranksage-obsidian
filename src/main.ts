@@ -5,7 +5,10 @@
  *
  * Architecture:
  *  - Auth: OAuth 2.0 PKCE flow via system browser + obsidian://ranksage-callback
- *  - Tokens: stored via plugin.saveData() (user-owned local vault storage)
+ *  - Tokens (SEC-013): ONLY the refresh token is persisted via plugin.saveData()
+ *    (plaintext in data.json — Obsidian has no keychain API; see types.ts for the
+ *    full threat notes). Access tokens are held in memory only and never written
+ *    to disk. Disconnect revokes the refresh token server-side (RFC 7009).
  *  - Digest: fetched from GET /api/v1/digest using requestUrl() (CORS bypass)
  *  - Injection: fenced comment block in today's daily note (replace-on-rerun)
  */
@@ -20,7 +23,7 @@ import {
   ObsidianProtocolData,
 } from 'obsidian';
 import { PluginSettings, PluginData, DEFAULT_SETTINGS, DEFAULT_DATA } from './types';
-import { generatePKCEParams, buildAuthorizeUrl, exchangeCodeForTokens, refreshAccessToken } from './oauth';
+import { generatePKCEParams, buildAuthorizeUrl, exchangeCodeForTokens, refreshAccessToken, revokeRefreshToken } from './oauth';
 import { fetchDigest, formatDigestBlock, injectDigestBlock } from './digest';
 import { RankSageSettingsTab } from './settings';
 
@@ -51,6 +54,16 @@ export default class RankSagePlugin extends Plugin {
    * Cleared once the callback is received.
    */
   private pendingOAuth: { codeVerifier: string; state: string } | null = null;
+
+  /**
+   * WHAT: Access token + expiry held in MEMORY ONLY (SEC-013 minimization).
+   * HOW:  Populated by storeTokens() on exchange/refresh; never passed to saveData().
+   * WHY:  data.json is plaintext on disk — the short-lived access token has no
+   *       business being persisted when the refresh token can silently mint a new
+   *       one on next startup. Worst case after restart is one extra refresh call.
+   */
+  private accessToken: string | null = null;
+  private accessTokenExpiresAt: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -98,6 +111,9 @@ export default class RankSagePlugin extends Plugin {
 
   onunload(): void {
     this.pendingOAuth = null;
+    // SEC-013: drop the in-memory access token when the plugin unloads.
+    this.accessToken = null;
+    this.accessTokenExpiresAt = null;
   }
 
   // ── Settings persistence ─────────────────────────────────────────────────
@@ -109,7 +125,24 @@ export default class RankSagePlugin extends Plugin {
 
   async loadPluginData(): Promise<void> {
     const saved = (await this.loadData()) as { settings?: PluginSettings; data?: PluginData } | null;
-    this.pluginData = Object.assign({}, DEFAULT_DATA, saved?.data);
+
+    /**
+     * WHAT: Load persisted data, picking ONLY the fields PluginData still owns.
+     * HOW:  Explicit field pick instead of Object.assign spread of saved.data.
+     * WHY:  Versions before SEC-013 persisted accessToken/accessTokenExpiresAt;
+     *       a blind merge would silently carry those plaintext tokens forward.
+     */
+    const savedData = (saved?.data ?? {}) as Partial<PluginData> & { accessToken?: string | null };
+    this.pluginData = {
+      refreshToken: savedData.refreshToken ?? DEFAULT_DATA.refreshToken,
+      lastDigest: savedData.lastDigest ?? DEFAULT_DATA.lastDigest,
+      lastFetchedAt: savedData.lastFetchedAt ?? DEFAULT_DATA.lastFetchedAt,
+    };
+
+    // One-time migration: scrub a legacy plaintext access token out of data.json.
+    if (savedData.accessToken !== undefined) {
+      await this.savePluginData();
+    }
   }
 
   async saveSettings(): Promise<void> {
@@ -187,17 +220,19 @@ export default class RankSagePlugin extends Plugin {
 
   /**
    * Store new tokens returned from the backend.
+   * SEC-013: the access token stays in memory; only the refresh token is persisted.
    */
   private async storeTokens(tokens: {
     access_token: string;
     refresh_token: string;
     expires_in: number;
   }): Promise<void> {
-    this.pluginData.accessToken = tokens.access_token;
-    this.pluginData.refreshToken = tokens.refresh_token;
+    this.accessToken = tokens.access_token;
     // WHY 60s buffer: access tokens can't be refreshed the instant they expire
     // if there's a network round trip. Subtract 60s so we refresh proactively.
-    this.pluginData.accessTokenExpiresAt = Date.now() + (tokens.expires_in - 60) * 1000;
+    this.accessTokenExpiresAt = Date.now() + (tokens.expires_in - 60) * 1000;
+
+    this.pluginData.refreshToken = tokens.refresh_token;
     await this.savePluginData();
   }
 
@@ -207,24 +242,25 @@ export default class RankSagePlugin extends Plugin {
    * @returns Valid access token, or null if no refresh token is available
    */
   private async ensureValidAccessToken(): Promise<string | null> {
-    const { accessToken, refreshToken, accessTokenExpiresAt } = this.pluginData;
+    const { refreshToken } = this.pluginData;
 
     if (!refreshToken) return null;
 
-    const isExpired = !accessTokenExpiresAt || Date.now() >= accessTokenExpiresAt;
+    const isExpired = !this.accessTokenExpiresAt || Date.now() >= this.accessTokenExpiresAt;
 
-    if (!isExpired && accessToken) return accessToken;
+    if (!isExpired && this.accessToken) return this.accessToken;
 
-    // Silent background refresh
+    // Silent background refresh — always the path after a restart, since the
+    // access token is memory-only (SEC-013) and dies with the process.
     try {
       const tokens = await refreshAccessToken(refreshToken);
       await this.storeTokens(tokens);
       return tokens.access_token;
     } catch (error) {
       // Refresh token is expired or revoked — clear credentials
-      this.pluginData.accessToken = null;
+      this.accessToken = null;
+      this.accessTokenExpiresAt = null;
       this.pluginData.refreshToken = null;
-      this.pluginData.accessTokenExpiresAt = null;
       await this.savePluginData();
       new Notice('RankSage: Session expired. Please reconnect in Settings.');
       return null;
@@ -234,15 +270,39 @@ export default class RankSagePlugin extends Plugin {
   // ── Disconnect ───────────────────────────────────────────────────────────
 
   /**
-   * Disconnect the plugin — clears stored tokens locally.
-   * Does not call the backend revocation endpoint (best-effort; tokens expire).
+   * WHAT: Disconnect the plugin — revokes the grant server-side, then clears
+   *       local credentials (SEC-013).
+   * HOW:  Best-effort POST /api/v1/oauth/revoke with the stored refresh token
+   *       (RFC 7009 — possession of the token is the authentication), followed
+   *       by an unconditional local wipe.
+   * WHY:  data.json is plaintext; a purely local wipe would leave any copies
+   *       (sync services, backups) holding a still-valid 90-day refresh token.
+   * NOTE: Local wipe proceeds even if revocation fails (offline) — otherwise
+   *       the user could never sign out without network access.
    */
   async disconnect(): Promise<void> {
-    this.pluginData.accessToken = null;
+    const { refreshToken } = this.pluginData;
+
+    let revokedServerSide = false;
+    if (refreshToken) {
+      try {
+        await revokeRefreshToken(refreshToken);
+        revokedServerSide = true;
+      } catch (error) {
+        console.error('[RankSage] Server-side token revocation failed:', error);
+      }
+    }
+
+    this.accessToken = null;
+    this.accessTokenExpiresAt = null;
     this.pluginData.refreshToken = null;
-    this.pluginData.accessTokenExpiresAt = null;
     await this.savePluginData();
-    new Notice('RankSage disconnected.');
+
+    new Notice(
+      revokedServerSide || !refreshToken
+        ? 'RankSage disconnected.'
+        : 'RankSage disconnected locally, but server-side revocation failed. If this device is shared, also revoke access from the RankSage dashboard.'
+    );
   }
 
   // ── Digest injection ─────────────────────────────────────────────────────
