@@ -8,4 +8,4 @@
  * URL obscurity. This pattern is standard for consumer integrations
  * (Slack, Linear, Notion all hardcode their API origins at build time).
  */
-export const BACKEND_URL = 'https://api.ranksage.io';
+export const BACKEND_URL = 'https://api.ranksage.com';
