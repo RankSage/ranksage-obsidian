@@ -1,6 +1,6 @@
 # RankSage Daily Brief — Obsidian Plugin
 
-Automatically inject your [RankSage](https://ranksage.io) SEO, AEO, and AI visibility daily brief into your Obsidian daily notes.
+Automatically inject your [RankSage](https://www.ranksage.com) SEO, AEO, and AI visibility daily brief into your Obsidian daily notes.
 
 ## Features
 
@@ -22,7 +22,7 @@ Automatically inject your [RankSage](https://ranksage.io) SEO, AEO, and AI visib
 ## Requirements
 
 - Obsidian 1.4.0+ (desktop only)
-- A [RankSage](https://ranksage.io) account
+- A [RankSage](https://www.ranksage.com) account
 - The **Daily Notes** core plugin enabled in Obsidian
 
 ## Community Plugins Release Checklist
@@ -55,7 +55,7 @@ Copy `manifest.json` and `main.js` into your vault's `.obsidian/plugins/ranksage
 ```
 Obsidian Plugin
   → generates PKCE code_verifier + code_challenge
-  → opens browser: GET https://api.ranksage.io/oauth/authorize?...
+  → opens browser: GET https://api.ranksage.com/oauth/authorize?...
   → backend redirects → RankSage frontend consent page
   → user approves → frontend calls POST /api/v1/oauth/grants (Clerk JWT)
   → frontend redirects browser: obsidian://ranksage-callback?code=...

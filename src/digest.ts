@@ -137,7 +137,7 @@ export function formatDigestBlock(
   const sections =
     digest.websites.length > 0
       ? digest.websites.map((site) => formatWebsiteSection(site, fetchedAt)).join('\n\n---\n\n')
-      : '_No websites tracked yet. [Add your first site →](https://app.ranksage.io/sites)_';
+      : '_No websites tracked yet. [Add your first site →](https://ranksage-dashboard-frontend.vercel.app/sites)_';
 
   const footer = `_Last updated: ${new Date(fetchedAt).toLocaleTimeString()} · [Refresh](obsidian://ranksage-refresh)_`;
 
